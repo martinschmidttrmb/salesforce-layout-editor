@@ -1,30 +1,29 @@
 """
-Real Drag & Drop Salesforce Layout Editor
-=========================================
-True drag-and-drop with visual feedback:
-- Click and hold drag handle (⋮⋮)
-- Drag over another field (green highlight)
-- Release to swap positions
-- Visual drag preview follows cursor
-- Hide/show buttons for each field
+Simple Salesforce Layout Editor with Drag-Like Interface
+=======================================================
+Simplified drag-like interface with click-to-select and swap functionality.
+- Click on field handles to select/swap
+- Hide/show toggles next to each field  
+- Original field positions preserved
+- Hidden fields panel
+- Always in "drag mode"
 
 Author: Assistant for Vibe Coder
 """
 
 import streamlit as st
-from streamlit_sortables import sort_items
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 
 # Page configuration
 st.set_page_config(
-    page_title="Real Drag & Drop Editor",
+    page_title="Salesforce Layout Editor", 
     page_icon="🎯",
     layout="wide"
 )
 
-# Salesforce styling with enhanced drag effects
+# Enhanced Salesforce-like styling with drag handles
 st.markdown("""
 <style>
     .main > div {
@@ -59,61 +58,48 @@ st.markdown("""
         align-items: center;
     }
     
-    .instructions {
-        background-color: #E3F2FD;
-        border-left: 4px solid #1B96FF;
+    .sf-field-grid {
         padding: 1rem;
-        margin: 1rem 0;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        background-color: white;
+    }
+    
+    .sf-field {
+        border: 1px solid #E5E5E5;
         border-radius: 0.25rem;
+        padding: 0.75rem;
+        background-color: #FAFAF9;
+        transition: all 0.2s;
+        position: relative;
+        cursor: grab;
     }
     
-    .hidden-panel {
-        background-color: #FFF3CD;
-        border: 1px solid #FFEAA7;
-        border-radius: 0.25rem;
-        padding: 1rem;
-        margin: 1rem 0;
+    .sf-field:hover {
+        border-color: #1B96FF;
+        box-shadow: 0 2px 4px rgba(27, 150, 255, 0.1);
+        transform: translateY(-1px);
     }
     
-    /* Enhanced sortable styling */
-    .sortable-item {
-        border: 1px solid #E5E5E5 !important;
-        border-radius: 0.25rem !important;
-        padding: 0.75rem !important;
-        background-color: #FAFAF9 !important;
-        margin: 0.5rem 0 !important;
-        cursor: grab !important;
-        transition: all 0.3s ease !important;
-        position: relative !important;
+    .sf-field:active {
+        cursor: grabbing;
     }
     
-    .sortable-item:hover {
+    .sf-field-selected {
         border-color: #1B96FF !important;
-        box-shadow: 0 4px 8px rgba(27, 150, 255, 0.15) !important;
+        box-shadow: 0 0 10px rgba(27, 150, 255, 0.3) !important;
+        background-color: #F0F8FF !important;
         transform: translateY(-2px) !important;
     }
     
-    .sortable-item:active {
-        cursor: grabbing !important;
-    }
-    
-    /* Dragging state */
-    .sortable-item.sortable-ghost {
-        opacity: 0.4 !important;
-        background-color: #E3F2FD !important;
-        border: 2px dashed #1B96FF !important;
-        transform: rotate(1deg) scale(1.05) !important;
-    }
-    
-    /* Drop target styling */
-    .sortable-item.sortable-chosen {
+    .sf-field-target {
         border-color: #28a745 !important;
+        box-shadow: 0 0 8px rgba(40, 167, 69, 0.3) !important;
         background-color: #F8FFF9 !important;
-        box-shadow: 0 0 15px rgba(40, 167, 69, 0.4) !important;
-        transform: scale(1.02) !important;
     }
     
-    .field-label {
+    .sf-field-label {
         font-weight: 600;
         color: #3E3E3C;
         font-size: 0.75rem;
@@ -125,28 +111,38 @@ st.markdown("""
         align-items: center;
     }
     
-    .field-value {
+    .sf-field-value {
         color: #080707;
         font-size: 0.875rem;
         padding: 0.25rem 0;
         border-bottom: 1px solid #E5E5E5;
-        word-break: break-word;
     }
     
     .drag-handle {
         color: #1B96FF;
-        font-size: 1.1rem;
-        margin-right: 0.5rem;
-        user-select: none;
+        font-size: 1rem;
+        cursor: grab;
+        padding: 0.25rem;
+        border-radius: 0.25rem;
+        transition: all 0.2s;
+    }
+    
+    .drag-handle:hover {
+        background-color: rgba(27, 150, 255, 0.1);
+        transform: scale(1.1);
+    }
+    
+    .drag-handle:active {
+        cursor: grabbing;
     }
     
     .hide-button {
-        background: none;
+        padding: 0.2rem 0.5rem;
         border: 1px solid #dee2e6;
         border-radius: 0.25rem;
-        padding: 0.2rem 0.4rem;
-        font-size: 0.7rem;
+        background-color: #f8f9fa;
         color: #6c757d;
+        font-size: 0.75rem;
         cursor: pointer;
         transition: all 0.2s;
     }
@@ -155,12 +151,38 @@ st.markdown("""
         background-color: #e9ecef;
         color: #495057;
     }
+    
+    .hidden-panel {
+        background-color: #FFF3CD;
+        border: 1px solid #FFEAA7;
+        border-radius: 0.25rem;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    
+    .instructions {
+        background-color: #E3F2FD;
+        border-left: 4px solid #1B96FF;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 0.25rem;
+    }
+    
+    .drag-status {
+        background-color: #D1ECF1;
+        border: 1px solid #BEE5EB;
+        border-radius: 0.25rem;
+        padding: 0.75rem;
+        margin: 1rem 0;
+        text-align: center;
+        color: #0C5460;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 @dataclass
 class LayoutField:
-    """A draggable field"""
+    """A field in the layout"""
     id: str
     label: str
     value: str = "--"
@@ -170,14 +192,14 @@ class LayoutField:
 
 @dataclass
 class LayoutSection:
-    """A section with draggable fields"""
+    """A section containing fields"""
     name: str
     title: str
     fields: List[LayoutField]
     expanded: bool = True
 
-class RealDragDropEditor:
-    """Real drag and drop editor using sortables"""
+class SimpleDragEditor:
+    """Simple drag-like editor with click-to-swap"""
     
     def __init__(self):
         self.init_session_state()
@@ -187,13 +209,17 @@ class RealDragDropEditor:
         """Initialize session state"""
         if 'sections' not in st.session_state:
             st.session_state.sections = []
+        
+        if 'selected_field' not in st.session_state:
+            st.session_state.selected_field = None
+            
         if 'show_hidden_panel' not in st.session_state:
             st.session_state.show_hidden_panel = False
     
     def load_original_layout(self):
         """Load exact layout from screenshot"""
         if not st.session_state.sections:
-            # Account Information - exact positions
+            # Account Information - exact grid positions
             account_fields = [
                 # Row 1
                 LayoutField("account_name", "Account Name", "Steed Standard Transport Ltd.", "text", True, 0),
@@ -273,54 +299,39 @@ class RealDragDropEditor:
                 LayoutSection("parent_hierarchy", "Parent Hierarchy", parent_fields, True),
                 LayoutSection("customer_success", "Customer Success", success_fields, True)
             ]
-
-    def create_field_item(self, field: LayoutField, section_name: str) -> str:
-        """Create sortable field item with hide button"""
-        display_value = field.value if field.value else "--"
-        if field.field_type == "url" and field.value:
-            display_value = f'<a href="{field.value}" target="_blank">{field.value}</a>'
-        elif field.field_type == "phone" and field.value:
-            display_value = f'<a href="tel:{field.value}">{field.value}</a>'
-        
-        return f"""
-        <div data-field-id="{field.id}">
-            <div class="field-label">
-                <span><span class="drag-handle">⋮⋮</span> {field.label}</span>
-            </div>
-            <div class="field-value">{display_value}</div>
-        </div>
-        """
-
-    def update_field_order(self, section: LayoutSection, sorted_items: List[str]):
-        """Update field order based on drag and drop result"""
-        # Extract field IDs from sorted items  
-        new_order = []
-        for item_html in sorted_items:
-            # Parse field ID from HTML
-            if 'data-field-id="' in item_html:
-                start = item_html.find('data-field-id="') + 15
-                end = item_html.find('"', start)
-                field_id = item_html[start:end]
-                new_order.append(field_id)
-        
-        # Update positions based on new order
-        for i, field_id in enumerate(new_order):
-            field = next(f for f in section.fields if f.id == field_id)
-            field.position = i
-        
-        section.fields.sort(key=lambda x: x.position)
-
+    
+    def swap_fields(self, section_name: str, field1_id: str, field2_id: str):
+        """Swap two fields"""
+        for section in st.session_state.sections:
+            if section.name == section_name:
+                field1 = next(f for f in section.fields if f.id == field1_id)
+                field2 = next(f for f in section.fields if f.id == field2_id)
+                field1.position, field2.position = field2.position, field1.position
+                section.fields.sort(key=lambda x: x.position)
+                break
+    
     def render_instructions(self):
         """Render instructions"""
         st.markdown("""
         <div class="instructions">
-            <h4>🎯 Real Drag & Drop Layout Editor</h4>
-            <p><strong>🖱️ Drag & Drop:</strong> Click and hold any field by the ⋮⋮ handle, drag to desired position, release to drop</p>
-            <p><strong>👁️‍🗨️ Hide/Show:</strong> Click hide buttons below • Use "Show Hidden" panel to restore</p>
-            <p><strong>✨ Visual Feedback:</strong> Dragging fields get ghost effect, drop targets turn green</p>
+            <h4>🎯 Drag-Like Layout Editor</h4>
+            <p><strong>🔄 Rearrange:</strong> Click the ⋮⋮ drag handle on any field to select it, then click another field's handle to swap positions</p>
+            <p><strong>👁️‍🗨️ Hide/Show:</strong> Click the hide button next to any field • Use "Show Hidden" to restore</p>
+            <p><strong>📂 Sections:</strong> Click section headers to expand/collapse</p>
         </div>
         """, unsafe_allow_html=True)
-
+    
+    def render_drag_status(self):
+        """Show drag status"""
+        if st.session_state.selected_field:
+            section_name, field_label, _ = st.session_state.selected_field
+            st.markdown(f"""
+            <div class="drag-status">
+                🔄 <strong>"{field_label}"</strong> selected • Click another field's ⋮⋮ handle to swap positions • 
+                <a href="#" onclick="window.location.reload()">Cancel</a>
+            </div>
+            """, unsafe_allow_html=True)
+    
     def render_controls(self):
         """Render main controls"""
         col1, col2 = st.columns([3, 3])
@@ -336,9 +347,10 @@ class RealDragDropEditor:
         with col2:
             if st.button("🔄 Reset Layout"):
                 st.session_state.sections = []
+                st.session_state.selected_field = None
                 self.load_original_layout()
                 st.rerun()
-
+    
     def render_hidden_panel(self):
         """Render hidden fields panel"""
         if st.session_state.show_hidden_panel:
@@ -362,21 +374,23 @@ class RealDragDropEditor:
                         if st.button(f"👁️ {field.label}", key=f"unhide_{section_name}_{field.id}"):
                             field.visible = True
                             st.rerun()
-
+    
     def render_main_layout(self):
-        """Render main layout with drag and drop"""
+        """Render main layout"""
         st.markdown("""
         <div class="sf-header">
-            <h1>🎯 Real Drag & Drop Salesforce Editor</h1>
-            <p>Click and hold ⋮⋮ handles • Drag fields to reorder • Visual feedback shows drop zones</p>
+            <h1>🎯 Salesforce Layout Editor - Account Page</h1>
+            <p>Click ⋮⋮ handles to select and swap field positions • Click 👁️‍🗨️ to hide fields</p>
         </div>
         """, unsafe_allow_html=True)
         
+        self.render_drag_status()
+        
         for section in st.session_state.sections:
             self.render_section(section)
-
+    
     def render_section(self, section: LayoutSection):
-        """Render section with draggable fields"""
+        """Render a section with fields"""
         visible_count = len([f for f in section.fields if f.visible and f.label])
         hidden_count = len([f for f in section.fields if not f.visible and f.label])
         
@@ -399,35 +413,19 @@ class RealDragDropEditor:
                 st.rerun()
         
         if section.expanded:
-            # Get visible fields sorted by position
             sorted_fields = sorted(section.fields, key=lambda x: x.position)
             visible_fields = [f for f in sorted_fields if f.visible and f.label]
             
             if visible_fields:
-                # Create items for sortable interface
-                sortable_items = [self.create_field_item(field, section.name) for field in visible_fields]
+                st.markdown('<div class="sf-field-grid">', unsafe_allow_html=True)
                 
-                # Render sortable fields
-                sorted_items = sort_items(
-                    sortable_items,
-                    direction="vertical",
-                    key=f"sort_{section.name}"
-                )
-                
-                # Update field order if changed
-                if sorted_items != sortable_items:
-                    self.update_field_order(section, sorted_items)
-                    st.rerun()
-                
-                # Render hide buttons for visible fields
-                st.markdown("**Field Controls:**")
-                cols = st.columns(min(4, len(visible_fields)))
+                cols = st.columns(2)
                 for i, field in enumerate(visible_fields):
-                    with cols[i % len(cols)]:
-                        if st.button(f"👁️‍🗨️ {field.label}", key=f"hide_{section.name}_{field.id}"):
-                            field.visible = False
-                            st.rerun()
-                            
+                    col_idx = i % 2
+                    with cols[col_idx]:
+                        self.render_field(field, section)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.markdown("""
                 <div style="padding: 2rem; text-align: center; color: #666;">
@@ -436,7 +434,62 @@ class RealDragDropEditor:
                 """, unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
-
+    
+    def render_field(self, field: LayoutField, section: LayoutSection):
+        """Render a single field with drag handle and hide button"""
+        # Format value
+        display_value = field.value if field.value else "--"
+        if field.field_type == "url" and field.value:
+            display_value = f'<a href="{field.value}" target="_blank">{field.value}</a>'
+        elif field.field_type == "phone" and field.value:
+            display_value = f'<a href="tel:{field.value}">{field.value}</a>'
+        
+        # Determine field styling
+        field_class = "sf-field"
+        is_selected = (st.session_state.selected_field and 
+                      st.session_state.selected_field[0] == section.name and 
+                      st.session_state.selected_field[2] == field.id)
+        
+        if is_selected:
+            field_class += " sf-field-selected"
+        
+        # Create columns for field and hide button
+        col_field, col_hide = st.columns([5, 1])
+        
+        with col_field:
+            # Drag handle button
+            drag_key = f"drag_{section.name}_{field.id}"
+            if st.button("⋮⋮", key=drag_key, help=f"Click to select {field.label} for swapping"):
+                if (st.session_state.selected_field and 
+                    st.session_state.selected_field[0] == section.name and
+                    st.session_state.selected_field[2] != field.id):
+                    # Swap with selected field
+                    self.swap_fields(section.name, st.session_state.selected_field[2], field.id)
+                    st.session_state.selected_field = None
+                    st.success(f"Swapped fields!")
+                    st.rerun()
+                else:
+                    # Select this field
+                    st.session_state.selected_field = (section.name, field.label, field.id)
+                    st.rerun()
+            
+            # Field display
+            st.markdown(f"""
+            <div class="{field_class}">
+                <div class="sf-field-label">{field.label}</div>
+                <div class="sf-field-value">{display_value}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_hide:
+            if st.button("👁️‍🗨️", key=f"hide_{section.name}_{field.id}", help=f"Hide {field.label}"):
+                field.visible = False
+                # Clear selection if hiding selected field
+                if (st.session_state.selected_field and 
+                    st.session_state.selected_field[2] == field.id):
+                    st.session_state.selected_field = None
+                st.rerun()
+    
     def render_export_tools(self):
         """Render export tools"""
         st.markdown("### 🛠️ Export & Save")
@@ -449,14 +502,14 @@ class RealDragDropEditor:
                 st.download_button(
                     "📋 Download JSON",
                     layout_json,
-                    "salesforce_real_drag_layout.json",
+                    "salesforce_layout.json",
                     "application/json"
                 )
         
         with col2:
             if st.button("💾 Save Layout"):
                 st.success("Layout saved! (Demo)")
-
+    
     def run(self):
         """Main app runner"""
         self.render_instructions()
@@ -468,5 +521,5 @@ class RealDragDropEditor:
 
 # Run the application
 if __name__ == "__main__":
-    app = RealDragDropEditor()
+    app = SimpleDragEditor()
     app.run()
